@@ -1,0 +1,69 @@
+from flask import Flask, request
+import requests
+
+app = Flask(__name__)
+
+# Токен VK бота
+VK_TOKEN = "ВАШ_VK_TOKEN"
+
+# URL Suno (тут будет ваш API для генерации песни)
+SUNO_API_URL = "ВАШ_SUNO_API_URL"
+
+@app.route("/generate_vk", methods=["POST"])
+def generate_vk():
+    data = request.json
+    prompt = data["prompt"]        # Промт от пользователя
+    user_id = data["user_id"]      # ID пользователя в VK
+
+    # 1️⃣ Отправляем промт в Suno
+    response = requests.post(SUNO_API_URL, json={"prompt": prompt})
+    audio_url = response.json()["audio_url"]
+
+    # 2️⃣ Скачиваем mp3
+    audio_file = requests.get(audio_url)
+    with open("song.mp3", "wb") as f:
+        f.write(audio_file.content)
+
+    # 3️⃣ Загружаем аудио в VK
+    upload_resp = requests.get(
+        "https://api.vk.com/method/docs.getMessagesUploadServer",
+        params={
+            "access_token": VK_TOKEN,
+            "v": "5.131",
+            "type": "audio_message",
+            "peer_id": user_id
+        }
+    ).json()
+
+    upload_url = upload_resp["response"]["upload_url"]
+
+    files = {"file": open("song.mp3", "rb")}
+    vk_upload_resp = requests.post(upload_url, files=files).json()
+
+    save_resp = requests.get(
+        "https://api.vk.com/method/docs.save",
+        params={
+            "access_token": VK_TOKEN,
+            "v": "5.131",
+            "file": vk_upload_resp["file"]
+        }
+    ).json()
+
+    doc_id = save_resp["response"]["doc"]["id"]
+    owner_id = save_resp["response"]["doc"]["owner_id"]
+
+    # 4️⃣ Отправляем аудио пользователю
+    requests.get(
+        "https://api.vk.com/method/messages.send",
+        params={
+            "access_token": VK_TOKEN,
+            "v": "5.131",
+            "peer_id": user_id,
+            "attachment": f"doc{owner_id}_{doc_id}",
+            "random_id": 0
+        }
+    )
+
+    return {"status": "ok"}
+
+app.run(host="0.0.0.0", port=5000)
